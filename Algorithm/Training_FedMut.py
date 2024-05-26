@@ -6,10 +6,11 @@ import copy
 import numpy as np
 import random
 from models.Fed import Aggregation
-from utils.utils import save_result, save_fedmut_result,save_model
+from utils.utils import save_result, save_fedmut_result, save_model
 from models.test import test_img
 from models.Update import DatasetSplit
 from optimizer.Adabelief import AdaBelief
+from scipy.optimize import minimize
 
 
 class LocalUpdate_FedMut(object):
@@ -58,6 +59,7 @@ class LocalUpdate_FedMut(object):
 
         return net.state_dict()
 
+
 def FedMut(args, net_glob, dataset_train, dataset_test, dict_users):
     net_glob.train()
     acc = []
@@ -67,7 +69,7 @@ def FedMut(args, net_glob, dataset_train, dataset_test, dict_users):
     m = max(int(args.frac * args.num_users), 1)
     for i in range(m):
         w_locals.append(copy.deepcopy(net_glob.state_dict()))
-    
+
     delta_list = []
     max_rank = 0
     w_old = copy.deepcopy(net_glob.state_dict())
@@ -78,18 +80,16 @@ def FedMut(args, net_glob, dataset_train, dataset_test, dict_users):
         print('*' * 80)
         print('Round {:3d}'.format(iter))
 
-
         m = max(int(args.frac * args.num_users), 1)
         idxs_users = np.random.choice(range(args.num_users), m, replace=False)
         for i, idx in enumerate(idxs_users):
-
             net_glob.load_state_dict(w_locals[i])
             local = LocalUpdate_FedMut(args=args, dataset=dataset_train, idxs=dict_users[idx])
             w = local.train(net=net_glob)
             w_locals[i] = copy.deepcopy(w)
 
         # update global weights
-        w_glob = Aggregation(w_locals, None) # Global Model Generation
+        w_glob = Aggregation(w_locals, None)  # Global Model Generation
 
         # copy weight to net_glob
         net_glob.load_state_dict(w_glob)
@@ -97,15 +97,13 @@ def FedMut(args, net_glob, dataset_train, dataset_test, dict_users):
         acc.append(test(net_glob, dataset_test, args))
 
         w_delta = FedSub(w_glob, w_old, 1.0)
-        rank = delta_rank(args,w_delta)
+        rank = delta_rank(args, w_delta)
         print(rank)
         if rank > max_rank:
             max_rank = rank
         alpha = args.radius
         # alpha = min(max(args.radius, max_rank/rank),(10.0-args.radius) * (1 - iter/args.epochs) + args.radius)
         w_locals = mutation_spread(args, iter, w_glob, w_old, w_locals, m, w_delta, alpha)
-        
-
 
     save_fedmut_result(acc, 'test_acc', args)
     save_model(net_glob.state_dict(), 'test_model', args)
@@ -117,17 +115,16 @@ def mutation_spread(args, iter, w_glob, w_old, w_locals, m, w_delta, alpha):
     # if iter/args.epochs > 0.5:
     #     w_delta = FedSub(w_glob,w_old,(args.radius - args.min_radius) * (1.0 - iter/args.epochs)*2 + args.min_radius)
     # else:
-        # w_delta = FedSub(w_glob,w_old,(args.radius - args.min_radius) * (iter/args.epochs)*2 + args.min_radius)
+    # w_delta = FedSub(w_glob,w_old,(args.radius - args.min_radius) * (iter/args.epochs)*2 + args.min_radius)
     # w_delta = FedSub(w_glob, w_old, args.radius)
-
 
     w_locals_new = []
     ctrl_cmd_list = []
-    ctrl_rate = args.mut_acc_rate * (1.0 - min(iter*1.0/args.mut_bound,1.0))
+    ctrl_rate = args.mut_acc_rate * (1.0 - min(iter * 1.0 / args.mut_bound, 1.0))
 
     for k in w_glob.keys():
         ctrl_list = []
-        for i in range(0,int(m/2)):
+        for i in range(0, int(m / 2)):
             ctrl = random.random()
             if ctrl > 0.5:
                 ctrl_list.append(1.0)
@@ -137,17 +134,17 @@ def mutation_spread(args, iter, w_glob, w_old, w_locals, m, w_delta, alpha):
                 ctrl_list.append(1.0)
         random.shuffle(ctrl_list)
         ctrl_cmd_list.append(ctrl_list)
+
     cnt = 0
     for j in range(m):
         w_sub = copy.deepcopy(w_glob)
-        if not (cnt == m -1 and m%2 == 1):
+        if not (cnt == m - 1 and m % 2 == 1):
             ind = 0
             for k in w_sub.keys():
                 w_sub[k] = w_sub[k] + w_delta[k]*ctrl_cmd_list[ind][j]*alpha
                 ind += 1
         cnt += 1
         w_locals_new.append(w_sub)
-
 
     return w_locals_new
 
@@ -164,11 +161,12 @@ def test(net_glob, dataset_test, args):
 def FedSub(w, w_old, weight):
     w_sub = copy.deepcopy(w)
     for k in w_sub.keys():
-        w_sub[k] = (w[k] - w_old[k])*weight
+        w_sub[k] = (w[k] - w_old[k]) * weight
 
     return w_sub
 
-def delta_rank(args,delta_dict):
+
+def delta_rank(args, delta_dict):
     cnt = 0
     dict_a = torch.Tensor(0)
     s = 0
@@ -179,8 +177,8 @@ def delta_rank(args,delta_dict):
             dict_a = a
         else:
             dict_a = torch.cat((dict_a, a), dim=0)
-               
+
         cnt += 1
-            # print(sim)
+        # print(sim)
     s = torch.norm(dict_a, dim=0)
     return s
